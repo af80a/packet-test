@@ -28,7 +28,7 @@ type ClientConfig struct {
 
 // RunClient runs the UDP test client
 func RunClient(cfg ClientConfig) error {
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 	conn, err := net.Dial("udp", addr)
 	if err != nil {
 		return fmt.Errorf("failed to connect to %s: %w", addr, err)
