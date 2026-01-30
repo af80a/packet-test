@@ -79,36 +79,44 @@ const htmlTemplate = `<!DOCTYPE html>
     </div>
 
     <div class="chart-container">
+        <canvas id="throughputChart"></canvas>
+    </div>
+
+    <div class="chart-container">
         <canvas id="lossChart"></canvas>
     </div>
 
     <script>
         const data = {{DATA_JSON}};
 
-        // Latency chart
+        // Sort data by sequence number for proper display
+        data.sort((a, b) => a.seq - b.seq);
+
+        // Latency bar chart
         new Chart(document.getElementById('latencyChart'), {
-            type: 'line',
+            type: 'bar',
             data: {
                 labels: data.map(d => d.seq),
                 datasets: [{
                     label: 'Latency (ms)',
                     data: data.map(d => d.lost ? null : d.latency),
-                    borderColor: '#00d9ff',
-                    backgroundColor: 'rgba(0, 217, 255, 0.1)',
-                    fill: true,
-                    tension: 0.1,
-                    pointRadius: 0
+                    backgroundColor: data.map(d => {
+                        if (d.lost) return '#ff6b6b';
+                        if (d.latency > 50) return '#feca57';
+                        return '#00d9ff';
+                    }),
+                    borderWidth: 0
                 }]
             },
             options: {
                 responsive: true,
                 plugins: {
-                    title: { display: true, text: 'Latency Over Time', color: '#eee' }
+                    title: { display: true, text: 'Latency Per Packet', color: '#eee' }
                 },
                 scales: {
                     x: {
                         title: { display: true, text: 'Packet Sequence', color: '#888' },
-                        ticks: { color: '#888' },
+                        ticks: { color: '#888', maxTicksLimit: 20 },
                         grid: { color: '#333' }
                     },
                     y: {
@@ -120,15 +128,71 @@ const htmlTemplate = `<!DOCTYPE html>
             }
         });
 
+        // Calculate throughput over time (packets per 500ms window)
+        const receivedPackets = data.filter(d => !d.lost && d.recvTime > 0);
+        if (receivedPackets.length > 0) {
+            const minTime = Math.min(...receivedPackets.map(d => d.recvTime));
+            const maxTime = Math.max(...receivedPackets.map(d => d.recvTime));
+            const windowMs = 500; // 500ms windows
+            const throughputData = [];
+
+            for (let t = minTime; t < maxTime; t += windowMs) {
+                const windowEnd = t + windowMs;
+                const packetsInWindow = receivedPackets.filter(d => d.recvTime >= t && d.recvTime < windowEnd).length;
+                const pps = (packetsInWindow / windowMs) * 1000; // packets per second
+                throughputData.push({
+                    time: ((t - minTime) / 1000).toFixed(1),
+                    pps: pps
+                });
+            }
+
+            // Throughput chart
+            new Chart(document.getElementById('throughputChart'), {
+                type: 'bar',
+                data: {
+                    labels: throughputData.map(d => d.time + 's'),
+                    datasets: [{
+                        label: 'Packets/sec',
+                        data: throughputData.map(d => d.pps),
+                        backgroundColor: throughputData.map(d => {
+                            if (d.pps < 30) return '#ff6b6b';
+                            if (d.pps < 50) return '#feca57';
+                            return '#4ecdc4';
+                        }),
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: { display: true, text: 'Throughput Over Time (packets received per second)', color: '#eee' }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Time', color: '#888' },
+                            ticks: { color: '#888' },
+                            grid: { color: '#333' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Packets/sec', color: '#888' },
+                            ticks: { color: '#888' },
+                            grid: { color: '#333' },
+                            min: 0
+                        }
+                    }
+                }
+            });
+        }
+
         // Calculate packet loss over windows
         const windowSize = Math.max(10, Math.floor(data.length / 100));
         const lossData = [];
         for (let i = 0; i < data.length; i += windowSize) {
-            const window = data.slice(i, i + windowSize);
-            const lost = window.filter(d => d.lost).length;
+            const win = data.slice(i, i + windowSize);
+            const lost = win.filter(d => d.lost).length;
             lossData.push({
                 seq: i + windowSize/2,
-                loss: (lost / window.length) * 100
+                loss: (lost / win.length) * 100
             });
         }
 
@@ -199,6 +263,7 @@ func GeneratePlot(csvFile string) error {
 		}
 
 		seq := record[0]
+		recvTime := record[2]
 		latency, _ := strconv.ParseFloat(record[3], 64)
 		lost := record[4] == "true"
 
@@ -215,7 +280,7 @@ func GeneratePlot(csvFile string) error {
 		if i > 0 {
 			dataJSON.WriteString(",")
 		}
-		dataJSON.WriteString(fmt.Sprintf(`{"seq":%s,"latency":%.2f,"lost":%t}`, seq, latency, lost))
+		dataJSON.WriteString(fmt.Sprintf(`{"seq":%s,"recvTime":%s,"latency":%.2f,"lost":%t}`, seq, recvTime, latency, lost))
 	}
 	dataJSON.WriteString("]")
 

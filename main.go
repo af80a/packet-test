@@ -19,9 +19,10 @@ func main() {
 	packetSize := flag.Int("packet-size", 128, "Packet payload size in bytes")
 	rate := flag.Int("rate", 64, "Packets per second")
 	duration := flag.Int("duration", 30, "Test duration in seconds")
-	output := flag.String("output", "", "Save results to CSV file")
+	output := flag.String("output", "", "CSV filename (auto-generated if empty)")
 	burst := flag.Bool("burst", false, "Send packets in bursts (exposes WiFi buffering)")
 	burstSize := flag.Int("burst-size", 10, "Packets per burst (with --burst)")
+	noPlot := flag.Bool("no-plot", false, "Don't generate HTML plot or open browser")
 
 	// Plot flag
 	plotFile := flag.String("plot", "", "Generate HTML chart from CSV file")
@@ -69,6 +70,7 @@ func main() {
 			OutputFile: *output,
 			Burst:      *burst,
 			BurstSize:  *burstSize,
+			NoPlot:     *noPlot,
 		}
 		err = RunClient(cfg)
 	}

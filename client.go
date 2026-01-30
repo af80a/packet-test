@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
+	"runtime"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -19,6 +22,7 @@ type ClientConfig struct {
 	OutputFile string
 	Burst      bool
 	BurstSize  int
+	NoPlot     bool
 }
 
 // RunClient runs the UDP test client
@@ -107,12 +111,27 @@ func RunClient(cfg ClientConfig) error {
 
 	stats.PrintSummary()
 
-	// Save to CSV if output file specified
-	if cfg.OutputFile != "" {
-		if err := saveCSV(cfg.OutputFile, stats); err != nil {
-			return fmt.Errorf("failed to save CSV: %w", err)
+	// Generate output filename if not specified
+	outputFile := cfg.OutputFile
+	if outputFile == "" {
+		timestamp := time.Now().Format("2006-01-02_15-04-05")
+		outputFile = fmt.Sprintf("packet-test_%s.csv", timestamp)
+	}
+
+	// Always save CSV
+	if err := saveCSV(outputFile, stats); err != nil {
+		return fmt.Errorf("failed to save CSV: %w", err)
+	}
+	fmt.Printf("\nResults saved to %s\n", outputFile)
+
+	// Generate HTML plot and open in browser
+	if !cfg.NoPlot {
+		if err := GeneratePlot(outputFile); err != nil {
+			return fmt.Errorf("failed to generate plot: %w", err)
 		}
-		fmt.Printf("\nResults saved to %s\n", cfg.OutputFile)
+
+		htmlFile := strings.TrimSuffix(outputFile, ".csv") + ".html"
+		openBrowser(htmlFile)
 	}
 
 	return nil
@@ -143,6 +162,24 @@ func receivePackets(conn net.Conn, stats *Stats, done chan struct{}) {
 			}
 		}
 	}
+}
+
+func openBrowser(path string) {
+	var cmd *exec.Cmd
+
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", path)
+	case "linux":
+		cmd = exec.Command("xdg-open", path)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", path)
+	default:
+		fmt.Printf("Open %s in your browser to view results\n", path)
+		return
+	}
+
+	cmd.Start()
 }
 
 func saveCSV(filename string, stats *Stats) error {
