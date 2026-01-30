@@ -14,6 +14,7 @@ type PacketRecord struct {
 	RecvTime  int64 // Unix nanoseconds, 0 if lost
 	LatencyMs float64
 	Lost      bool
+	Late      bool
 }
 
 // Stats tracks packet statistics
@@ -23,6 +24,9 @@ type Stats struct {
 
 	sent     uint64
 	received uint64
+	late     uint64
+
+	lateThreshold float64 // milliseconds
 
 	latencies []float64
 	minLat    float64
@@ -34,9 +38,10 @@ type Stats struct {
 }
 
 // NewStats creates a new Stats tracker
-func NewStats() *Stats {
+func NewStats(lateThreshold float64) *Stats {
 	return &Stats{
 		records:       make(map[uint64]*PacketRecord),
+		lateThreshold: lateThreshold,
 		minLat:        math.MaxFloat64,
 		maxLat:        0,
 		lastPrintTime: time.Now(),
@@ -72,6 +77,12 @@ func (s *Stats) RecordReceived(seqNum uint64, recvTime int64) {
 		record.LatencyMs = float64(recvTime-record.SentTime) / float64(time.Millisecond)
 		record.Lost = false
 
+		// Check if packet is late
+		if record.LatencyMs > s.lateThreshold {
+			record.Late = true
+			s.late++
+		}
+
 		s.received++
 		s.latencies = append(s.latencies, record.LatencyMs)
 		s.sumLat += record.LatencyMs
@@ -86,21 +97,22 @@ func (s *Stats) RecordReceived(seqNum uint64, recvTime int64) {
 }
 
 // GetIntervalStats returns stats for printing at intervals
-func (s *Stats) GetIntervalStats() (elapsed time.Duration, loss float64, minLat, avgLat, maxLat, jitter float64) {
+func (s *Stats) GetIntervalStats() (elapsed time.Duration, loss float64, lateCount uint64, minLat, avgLat, maxLat, jitter float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	elapsed = time.Since(s.startTime)
 
 	if s.sent == 0 {
-		return elapsed, 0, 0, 0, 0, 0
+		return elapsed, 0, 0, 0, 0, 0, 0
 	}
 
 	lost := s.sent - s.received
 	loss = float64(lost) / float64(s.sent) * 100
+	lateCount = s.late
 
 	if len(s.latencies) == 0 {
-		return elapsed, loss, 0, 0, 0, 0
+		return elapsed, loss, lateCount, 0, 0, 0, 0
 	}
 
 	minLat = s.minLat
@@ -124,7 +136,7 @@ func (s *Stats) PrintInterval() {
 	}
 	s.lastPrintTime = time.Now()
 
-	elapsed, loss, minLat, avgLat, maxLat, jitter := s.GetIntervalStats()
+	elapsed, loss, lateCount, minLat, avgLat, maxLat, jitter := s.GetIntervalStats()
 	secs := int(elapsed.Seconds())
 
 	spike := ""
@@ -132,8 +144,8 @@ func (s *Stats) PrintInterval() {
 		spike = "  << spike"
 	}
 
-	fmt.Printf("[%ds] Loss: %.1f%%  Latency: %.0f/%.0f/%.0fms  Jitter: %.0fms%s\n",
-		secs, loss, minLat, avgLat, maxLat, jitter, spike)
+	fmt.Printf("[%ds] Loss: %.1f%%  Late: %d  Latency: %.0f/%.0f/%.0fms  Jitter: %.0fms%s\n",
+		secs, loss, lateCount, minLat, avgLat, maxLat, jitter, spike)
 }
 
 // PrintSummary prints the final summary
@@ -145,12 +157,15 @@ func (s *Stats) PrintSummary() {
 
 	lost := s.sent - s.received
 	lossPercent := float64(0)
+	latePercent := float64(0)
 	if s.sent > 0 {
 		lossPercent = float64(lost) / float64(s.sent) * 100
+		latePercent = float64(s.late) / float64(s.sent) * 100
 	}
 
-	fmt.Printf("Packets: %d sent, %d received, %d lost (%.2f%%)\n",
-		s.sent, s.received, lost, lossPercent)
+	fmt.Printf("Packets: %d sent, %d received, %d lost (%.2f%%), %d late (%.2f%%)\n",
+		s.sent, s.received, lost, lossPercent, s.late, latePercent)
+	fmt.Printf("Late threshold: %.0fms\n", s.lateThreshold)
 
 	if len(s.latencies) > 0 {
 		avgLat := s.sumLat / float64(len(s.latencies))

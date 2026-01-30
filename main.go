@@ -23,6 +23,7 @@ func main() {
 	burst := flag.Bool("burst", false, "Send packets in bursts (exposes WiFi buffering)")
 	burstSize := flag.Int("burst-size", 10, "Packets per burst (with --burst)")
 	noPlot := flag.Bool("no-plot", false, "Don't generate HTML plot or open browser")
+	lateThreshold := flag.Float64("late-threshold", 100, "Packets above this latency (ms) are counted as late")
 
 	// Plot flag
 	plotFile := flag.String("plot", "", "Generate HTML chart from CSV file")
@@ -62,15 +63,16 @@ func main() {
 		err = RunServer(*port)
 	} else {
 		cfg := ClientConfig{
-			Host:       *host,
-			Port:       *port,
-			PacketSize: *packetSize,
-			Rate:       *rate,
-			Duration:   *duration,
-			OutputFile: *output,
-			Burst:      *burst,
-			BurstSize:  *burstSize,
-			NoPlot:     *noPlot,
+			Host:          *host,
+			Port:          *port,
+			PacketSize:    *packetSize,
+			Rate:          *rate,
+			Duration:      *duration,
+			OutputFile:    *output,
+			Burst:         *burst,
+			BurstSize:     *burstSize,
+			NoPlot:        *noPlot,
+			LateThreshold: *lateThreshold,
 		}
 		err = RunClient(cfg)
 	}

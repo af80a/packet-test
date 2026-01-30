@@ -14,15 +14,16 @@ import (
 
 // ClientConfig holds client configuration
 type ClientConfig struct {
-	Host       string
-	Port       int
-	PacketSize int
-	Rate       int
-	Duration   int
-	OutputFile string
-	Burst      bool
-	BurstSize  int
-	NoPlot     bool
+	Host          string
+	Port          int
+	PacketSize    int
+	Rate          int
+	Duration      int
+	OutputFile    string
+	Burst         bool
+	BurstSize     int
+	NoPlot        bool
+	LateThreshold float64 // milliseconds
 }
 
 // RunClient runs the UDP test client
@@ -42,7 +43,7 @@ func RunClient(cfg ClientConfig) error {
 			cfg.Rate, cfg.PacketSize, addr)
 	}
 
-	stats := NewStats()
+	stats := NewStats(cfg.LateThreshold)
 
 	// Start receiver goroutine
 	done := make(chan struct{})
@@ -193,7 +194,7 @@ func saveCSV(filename string, stats *Stats) error {
 	defer writer.Flush()
 
 	// Write header
-	writer.Write([]string{"seq", "sent_time", "recv_time", "latency_ms", "lost"})
+	writer.Write([]string{"seq", "sent_time", "recv_time", "latency_ms", "lost", "late"})
 
 	// Write records
 	records := stats.GetRecords()
@@ -204,6 +205,7 @@ func saveCSV(filename string, stats *Stats) error {
 			strconv.FormatInt(r.RecvTime/1000000, 10),
 			fmt.Sprintf("%.2f", r.LatencyMs),
 			strconv.FormatBool(r.Lost),
+			strconv.FormatBool(r.Late),
 		})
 	}
 
