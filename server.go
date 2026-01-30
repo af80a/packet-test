@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
+	"time"
 )
 
 // RunServer starts the UDP echo server
@@ -26,12 +28,19 @@ func RunServer(port int) error {
 			fmt.Printf("Read error: %v\n", err)
 			continue
 		}
+		recvTime := time.Now()
 
 		// Log new clients
 		addrStr := clientAddr.String()
 		if !clients[addrStr] {
 			clients[addrStr] = true
 			fmt.Printf("New client connected: %s\n", addrStr)
+		}
+
+		// Stamp server processing time into the response (if packet is large enough)
+		if n >= HeaderSize {
+			procNs := time.Since(recvTime).Nanoseconds()
+			binary.BigEndian.PutUint64(buf[16:24], uint64(procNs))
 		}
 
 		// Echo the packet back immediately

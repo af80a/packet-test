@@ -69,9 +69,10 @@ func RunClient(cfg ClientConfig) error {
 			case <-burstTicker.C:
 				// Send burst of packets as fast as possible
 				for i := 0; i < cfg.BurstSize; i++ {
-					pkt := NewPacket(seqNum, cfg.PacketSize)
+					sendTime := time.Now().UnixNano()
+					pkt := NewPacket(seqNum, cfg.PacketSize, sendTime)
 					data := pkt.Encode(cfg.PacketSize)
-					stats.RecordSent(seqNum, pkt.Timestamp)
+					stats.RecordSent(seqNum, sendTime)
 					conn.Write(data)
 					seqNum++
 				}
@@ -89,10 +90,11 @@ func RunClient(cfg ClientConfig) error {
 		for time.Now().Before(endTime) {
 			select {
 			case <-ticker.C:
-				pkt := NewPacket(seqNum, cfg.PacketSize)
+				sendTime := time.Now().UnixNano()
+				pkt := NewPacket(seqNum, cfg.PacketSize, sendTime)
 				data := pkt.Encode(cfg.PacketSize)
 
-				stats.RecordSent(seqNum, pkt.Timestamp)
+				stats.RecordSent(seqNum, sendTime)
 
 				_, err := conn.Write(data)
 				if err != nil {
@@ -159,7 +161,7 @@ func receivePackets(conn net.Conn, stats *Stats, done chan struct{}) {
 			recvTime := time.Now().UnixNano()
 			pkt := DecodePacket(buf[:n])
 			if pkt != nil {
-				stats.RecordReceived(pkt.SeqNum, recvTime)
+				stats.RecordReceived(pkt.SeqNum, recvTime, pkt.ServerProcNs)
 			}
 		}
 	}
@@ -194,7 +196,7 @@ func saveCSV(filename string, stats *Stats) error {
 	defer writer.Flush()
 
 	// Write header
-	writer.Write([]string{"seq", "sent_time", "recv_time", "latency_ms", "lost", "late"})
+	writer.Write([]string{"seq", "sent_time", "recv_time", "latency_ms", "server_proc_ms", "net_latency_ms", "lost", "late"})
 
 	// Write records
 	records := stats.GetRecords()
@@ -204,6 +206,8 @@ func saveCSV(filename string, stats *Stats) error {
 			strconv.FormatInt(r.SentTime/1000000, 10), // Convert to milliseconds
 			strconv.FormatInt(r.RecvTime/1000000, 10),
 			fmt.Sprintf("%.2f", r.LatencyMs),
+			fmt.Sprintf("%.2f", r.ServerProcMs),
+			fmt.Sprintf("%.2f", r.NetLatencyMs),
 			strconv.FormatBool(r.Lost),
 			strconv.FormatBool(r.Late),
 		})

@@ -71,10 +71,26 @@ const htmlTemplate = `<!DOCTYPE html>
             <div class="stat-value">{{MAX_LATENCY}}ms</div>
             <div class="stat-label">Max Latency</div>
         </div>
+        <div class="stat-box">
+            <div class="stat-value">{{AVG_NET_LATENCY}}</div>
+            <div class="stat-label">Avg Net+Client</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-value">{{AVG_SERVER_PROC}}</div>
+            <div class="stat-label">Avg Server Proc</div>
+        </div>
     </div>
 
     <div class="chart-container">
         <canvas id="latencyChart"></canvas>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="netLatencyChart"></canvas>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="serverProcChart"></canvas>
     </div>
 
     <div class="chart-container">
@@ -126,6 +142,84 @@ const htmlTemplate = `<!DOCTYPE html>
                 }
             }
         });
+
+        const hasNet = data.some(d => d.net !== null);
+        if (hasNet) {
+            new Chart(document.getElementById('netLatencyChart'), {
+                type: 'line',
+                data: {
+                    labels: data.map(d => d.seq),
+                    datasets: [{
+                        label: 'Net+Client (ms)',
+                        data: data.map(d => d.lost ? null : d.net),
+                        borderColor: '#4ecdc4',
+                        backgroundColor: 'rgba(78, 205, 196, 0.2)',
+                        pointRadius: 0,
+                        spanGaps: true,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: { display: true, text: 'Net+Client Latency Per Packet', color: '#eee' }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Packet Sequence', color: '#888' },
+                            ticks: { color: '#888', maxTicksLimit: 20 },
+                            grid: { color: '#333' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Latency (ms)', color: '#888' },
+                            ticks: { color: '#888' },
+                            grid: { color: '#333' }
+                        }
+                    }
+                }
+            });
+        } else {
+            document.getElementById('netLatencyChart').parentElement.style.display = 'none';
+        }
+
+        const hasServer = data.some(d => d.server !== null);
+        if (hasServer) {
+            new Chart(document.getElementById('serverProcChart'), {
+                type: 'line',
+                data: {
+                    labels: data.map(d => d.seq),
+                    datasets: [{
+                        label: 'Server Proc (ms)',
+                        data: data.map(d => d.lost ? null : d.server),
+                        borderColor: '#feca57',
+                        backgroundColor: 'rgba(254, 202, 87, 0.2)',
+                        pointRadius: 0,
+                        spanGaps: true,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: { display: true, text: 'Server Processing Time Per Packet', color: '#eee' }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Packet Sequence', color: '#888' },
+                            ticks: { color: '#888', maxTicksLimit: 20 },
+                            grid: { color: '#333' }
+                        },
+                        y: {
+                            title: { display: true, text: 'Time (ms)', color: '#888' },
+                            ticks: { color: '#888' },
+                            grid: { color: '#333' }
+                        }
+                    }
+                }
+            });
+        } else {
+            document.getElementById('serverProcChart').parentElement.style.display = 'none';
+        }
 
         // Calculate throughput over time (packets per 500ms window)
         const receivedPackets = data.filter(d => !d.lost && d.recvTime > 0);
@@ -255,21 +349,68 @@ func GeneratePlot(csvFile string) error {
 
 	var totalPackets, lostPackets int
 	var totalLatency, maxLatency float64
+	var totalNet, totalServer float64
+	var receivedCount int
+
+	header := records[0]
+	colIndex := make(map[string]int, len(header))
+	for i, col := range header {
+		colIndex[strings.TrimSpace(col)] = i
+	}
+
+	seqIdx, ok := colIndex["seq"]
+	if !ok {
+		return fmt.Errorf("CSV missing required column: seq")
+	}
+	recvIdx, ok := colIndex["recv_time"]
+	if !ok {
+		return fmt.Errorf("CSV missing required column: recv_time")
+	}
+	latIdx, ok := colIndex["latency_ms"]
+	if !ok {
+		return fmt.Errorf("CSV missing required column: latency_ms")
+	}
+	lostIdx, ok := colIndex["lost"]
+	if !ok {
+		return fmt.Errorf("CSV missing required column: lost")
+	}
+	netIdx, hasNet := colIndex["net_latency_ms"]
+	serverIdx, hasServer := colIndex["server_proc_ms"]
 
 	for i, record := range records[1:] { // Skip header
-		if len(record) < 5 {
+		if seqIdx >= len(record) || recvIdx >= len(record) || latIdx >= len(record) || lostIdx >= len(record) {
 			continue
 		}
 
-		seq := record[0]
-		recvTime := record[2]
-		latency, _ := strconv.ParseFloat(record[3], 64)
-		lost := record[4] == "true"
+		seq := record[seqIdx]
+		recvTime := record[recvIdx]
+		latency, _ := strconv.ParseFloat(record[latIdx], 64)
+		lost := record[lostIdx] == "true"
+
+		netJSON := "null"
+		serverJSON := "null"
+		if hasNet && netIdx < len(record) {
+			if netVal, err := strconv.ParseFloat(record[netIdx], 64); err == nil {
+				netJSON = fmt.Sprintf("%.2f", netVal)
+				if !lost {
+					totalNet += netVal
+				}
+			}
+		}
+		if hasServer && serverIdx < len(record) {
+			if serverVal, err := strconv.ParseFloat(record[serverIdx], 64); err == nil {
+				serverJSON = fmt.Sprintf("%.2f", serverVal)
+				if !lost {
+					totalServer += serverVal
+				}
+			}
+		}
 
 		totalPackets++
 		if lost {
 			lostPackets++
 		} else {
+			receivedCount++
 			totalLatency += latency
 			if latency > maxLatency {
 				maxLatency = latency
@@ -279,18 +420,27 @@ func GeneratePlot(csvFile string) error {
 		if i > 0 {
 			dataJSON.WriteString(",")
 		}
-		dataJSON.WriteString(fmt.Sprintf(`{"seq":%s,"recvTime":%s,"latency":%.2f,"lost":%t}`, seq, recvTime, latency, lost))
+		dataJSON.WriteString(fmt.Sprintf(`{"seq":%s,"recvTime":%s,"latency":%.2f,"net":%s,"server":%s,"lost":%t}`,
+			seq, recvTime, latency, netJSON, serverJSON, lost))
 	}
 	dataJSON.WriteString("]")
 
 	// Calculate summary stats
 	lossPercent := float64(0)
 	avgLatency := float64(0)
+	avgNet := "N/A"
+	avgServer := "N/A"
 	if totalPackets > 0 {
 		lossPercent = float64(lostPackets) / float64(totalPackets) * 100
 	}
-	if totalPackets-lostPackets > 0 {
-		avgLatency = totalLatency / float64(totalPackets-lostPackets)
+	if receivedCount > 0 {
+		avgLatency = totalLatency / float64(receivedCount)
+		if hasNet {
+			avgNet = fmt.Sprintf("%.1fms", totalNet/float64(receivedCount))
+		}
+		if hasServer {
+			avgServer = fmt.Sprintf("%.1fms", totalServer/float64(receivedCount))
+		}
 	}
 
 	// Generate HTML
@@ -299,6 +449,8 @@ func GeneratePlot(csvFile string) error {
 	html = strings.Replace(html, "{{LOSS_PERCENT}}", fmt.Sprintf("%.2f", lossPercent), 1)
 	html = strings.Replace(html, "{{AVG_LATENCY}}", fmt.Sprintf("%.1f", avgLatency), 1)
 	html = strings.Replace(html, "{{MAX_LATENCY}}", fmt.Sprintf("%.1f", maxLatency), 1)
+	html = strings.Replace(html, "{{AVG_NET_LATENCY}}", avgNet, 1)
+	html = strings.Replace(html, "{{AVG_SERVER_PROC}}", avgServer, 1)
 	html = strings.Replace(html, "{{DATA_JSON}}", dataJSON.String(), 1)
 
 	// Write output file
