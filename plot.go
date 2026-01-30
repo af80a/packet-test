@@ -16,8 +16,7 @@ const htmlTemplate = `<!DOCTYPE html>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            max-width: 1200px;
-            margin: 0 auto;
+            margin: 0;
             padding: 20px;
             background: #1a1a2e;
             color: #eee;
